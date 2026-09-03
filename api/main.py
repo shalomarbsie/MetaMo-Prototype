@@ -1,11 +1,13 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import copy
 import logging
+import os
 from threading import Lock
 from typing import Any
 from uuid import uuid4
 
+from cachetools import TTLCache
 from dotenv import load_dotenv
 from fastapi import FastAPI
 from pydantic import BaseModel, Field
@@ -56,7 +58,13 @@ app = FastAPI(
     version="0.1.0",
 )
 
-_states: dict[str, dict[str, Any]] = {}
+SESSION_MAX_ENTRIES = int(os.getenv("METAMO_SESSION_MAX_ENTRIES", "1000"))
+SESSION_TTL_SECONDS = float(os.getenv("METAMO_SESSION_TTL_SECONDS", "86400"))  # 24 hours
+
+_states: TTLCache[str, dict[str, Any]] = TTLCache(
+    maxsize=SESSION_MAX_ENTRIES,
+    ttl=SESSION_TTL_SECONDS,
+)
 _lock = Lock()
 
 
