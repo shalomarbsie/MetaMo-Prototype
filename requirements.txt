@@ -7,3 +7,4 @@ langchain-community
 python-dotenv
 fastapi
 uvicorn[standard]
+cachetools>=5.5.0
