@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import copy
 import logging
@@ -7,12 +7,13 @@ from typing import Any
 from uuid import uuid4
 
 from dotenv import load_dotenv
-from fastapi import FastAPI
+from fastapi import FastAPI, Query, status
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from core.decision import post_update, step
 from core.state import init_state
-from pipeline.parser import parse_context
+from pipeline import check_llm_health, parse_context
 from utils import resolve_provider_and_model_name
 
 
@@ -48,6 +49,14 @@ class RecommendationResponse(BaseModel):
     signals: dict[str, Any]
     score_top3: list[ScoreItem]
     state: dict[str, Any]
+
+
+class HealthResponse(BaseModel):
+    status: str
+    provider: str | None = None
+    model: str | None = None
+    latency_ms: float | None = None
+    error: str | None = None
 
 
 app = FastAPI(
@@ -128,9 +137,48 @@ def _state_summary(state: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-@app.get("/health")
-def health() -> dict[str, str]:
-    return {"status": "ok"}
+@app.get("/health", response_model=HealthResponse)
+def health(
+    check_provider: bool = Query(
+        default=True,
+        description="Whether to verify live connectivity and authentication with the configured LLM provider.",
+    ),
+) -> JSONResponse:
+    if not check_provider:
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content={"status": "ok"},
+        )
+
+    health_result = check_llm_health()
+    if not health_result.get("ok"):
+        logger.warning(
+            "MetaMo health check failed: provider=%s model=%s error=%s",
+            health_result.get("provider"),
+            health_result.get("model"),
+            health_result.get("error"),
+        )
+        return JSONResponse(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            content={
+                "status": "unhealthy",
+                "provider": health_result.get("provider"),
+                "model": health_result.get("model"),
+                "latency_ms": health_result.get("latency_ms"),
+                "error": health_result.get("error"),
+            },
+        )
+
+    return JSONResponse(
+        status_code=status.HTTP_200_OK,
+        content={
+            "status": "ok",
+            "provider": health_result.get("provider"),
+            "model": health_result.get("model"),
+            "latency_ms": health_result.get("latency_ms"),
+            "error": None,
+        },
+    )
 
 
 @app.post("/recommend-action", response_model=RecommendationResponse)
